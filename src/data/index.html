@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<script src="/gauge.min.js"></script>
+
+<style>
+body {
+    font-family: Arial;
+    margin: 12px;
+    background: #f5f5f5;
+    color: #222;
+    min-height: calc(100vh - 24px);
+    overflow: hidden;
+}
+.page-shell {
+    width: min(100%, 420px);
+    margin-left: auto;
+    margin-right: auto;
+    transform-origin: top center;
+}
+h2 {
+    margin: 0 0 10px;
+    text-align: center;
+}
+table, .gauge-wrap {
+    width: 100%;
+    max-width: 100%;
+    margin-left: auto;
+    margin-right: auto;
+}
+table { border-collapse: collapse; background: white; }
+td { padding: 6px 10px; border-bottom: 1px solid #ddd; }
+.gauge-wrap canvas { display: block; width: 100%; height: auto; }
+#layoutDebug {
+    position: fixed;
+    left: 8px;
+    top: 8px;
+    z-index: 9999;
+    background: rgba(0, 0, 0, 0.72);
+    color: #fff;
+    font: 12px/1.35 monospace;
+    padding: 6px 8px;
+    border-radius: 6px;
+    white-space: pre;
+    pointer-events: none;
+}
+</style>
+</head>
+
+<body>
+<div id="layoutDebug"></div>
+<div class="page-shell" id="pageShell">
+<h2>Jarvis Weather</h2>
+<table>
+<tr><td>Sensor ID</td><td id="sid">--</td></tr>
+<tr><td>Battery OK</td><td id="bat">--</td></tr>
+<tr><td>Temperature</td><td id="temp">--</td></tr>
+<tr><td>Humidity</td><td id="hum">--</td></tr>
+<tr><td>Wind Gust</td><td id="gust">--</td></tr>
+<tr><td>Wind Avg</td><td id="avg">--</td></tr>
+<tr><td>Wind Direction</td><td id="dir">--</td></tr>
+<tr><td>Rainfall</td><td id="rain">--</td></tr>
+</table>
+<br>
+<div class="gauge-wrap">
+<canvas id="windGauge"
+    data-type="radial-gauge"
+    data-min-value="0"
+    data-max-value="50"
+    data-major-ticks="0,10,20,30,40,50"
+    data-minor-ticks="5"
+    data-ticks-angle="180"
+    data-start-angle="180"
+    data-stroke-ticks="true"
+    data-highlights='[{ "from": 25, "to": 50, "color": "rgba(200,50,50,.75)" }]'
+    data-color-needle="#e63946"
+    data-units="kn"
+></canvas>
+</div>
+</div>
+
+<script>
+const windGauge = () => (document.gauges && document.gauges.get('windGauge')) || null;
+
+function resizeGauge() {
+    const table = document.querySelector('table');
+    const wrap = document.querySelector('.gauge-wrap');
+    const canvas = document.getElementById('windGauge');
+    if (!table || !wrap || !canvas) {
+        return;
+    }
+
+    const sideMargin = 8;
+    const ratio = 0.85;
+
+    const tableWidth = Math.round(table.getBoundingClientRect().width);
+    if (tableWidth <= 0) {
+        return;
+    }
+
+    const width = Math.max(120, tableWidth - sideMargin * 2);
+    const height = Math.round(width * ratio);
+
+    wrap.style.maxWidth = `${width + sideMargin * 2}px`;
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+
+    const gauge = windGauge();
+    if (gauge) {
+        gauge.update({ width, height });
+    }
+}
+
+function layoutPage() {
+    const shell = document.getElementById('pageShell');
+    const table = document.querySelector('table');
+    const wrap = document.querySelector('.gauge-wrap');
+    const canvas = document.getElementById('windGauge');
+    const debug = document.getElementById('layoutDebug');
+    if (!shell) {
+        return;
+    }
+
+    
+    shell.style.transform = 'scale(1)';
+    resizeGauge();
+
+    requestAnimationFrame(() => {
+        const shellRect = shell.getBoundingClientRect();
+        const bodyStyle = getComputedStyle(document.body);
+        const horizontalMargins =
+            parseFloat(bodyStyle.marginLeft) + parseFloat(bodyStyle.marginRight);
+        const verticalMargins =
+            parseFloat(bodyStyle.marginTop) + parseFloat(bodyStyle.marginBottom);
+
+        const availableWidth = Math.max(100, window.innerWidth - horizontalMargins);
+        const availableHeight = Math.max(100, window.innerHeight - verticalMargins);
+
+        const scaleX = availableWidth / shellRect.width;
+        const scaleY = availableHeight / shellRect.height;
+        const scale = Math.max(0.5, Math.min(scaleX, scaleY, 1));
+
+        shell.style.transform = `scale(${scale})`;
+
+        if (debug && table && wrap && canvas) {
+            const tableRect = table.getBoundingClientRect();
+            const wrapRect = wrap.getBoundingClientRect();
+            const canvasRect = canvas.getBoundingClientRect();
+            debug.textContent =
+                `vw x vh: ${Math.round(window.innerWidth)} x ${Math.round(window.innerHeight)}\n` +
+                `avail w/h: ${Math.round(availableWidth)} / ${Math.round(availableHeight)}\n` +
+                `shell w/h: ${Math.round(shellRect.width)} / ${Math.round(shellRect.height)}\n` +
+                `table h: ${Math.round(tableRect.height)}\n` +
+                `wrap h: ${Math.round(wrapRect.height)}\n` +
+                `gauge h: ${Math.round(canvasRect.height)}\n` +
+                `scale x/y: ${scaleX.toFixed(3)} / ${scaleY.toFixed(3)}\n` +
+                `applied: ${scale.toFixed(3)}`;
+        }
+    });
+}
+
+window.addEventListener('load', () => {
+    layoutPage();
+    setTimeout(layoutPage, 120);
+    setTimeout(layoutPage, 400);
+});
+window.addEventListener('resize', layoutPage);
+window.addEventListener('orientationchange', layoutPage);
+
+if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', layoutPage);
+}
+
+setInterval(() => {
+    fetch('/data')
+        .then(r => r.json())
+        .then(d => {
+            // Update gauge only if canvas-gauges initialized successfully.
+            const gauge = windGauge();
+            if (gauge) {
+                gauge.value = d.avg;
+            }
+
+            // Update table
+            document.getElementById('sid').innerText  = d.sid;
+            document.getElementById('bat').innerText  = d.bat;
+            document.getElementById('temp').innerText = d.temp + "\u00B0C";
+            document.getElementById('hum').innerText  = d.hum + "%";
+            document.getElementById('gust').innerText = d.gust + "kn";
+            document.getElementById('avg').innerText  = d.avg + "kn";
+            document.getElementById('dir').innerText  = d.dir + "\u00B0";
+            document.getElementById('rain').innerText = d.rain + "mm";
+        })
+        .catch(err => console.error('Data update failed:', err));
+}, 1000);
+</script>
+
+</body>
+</html>
