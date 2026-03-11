@@ -20,6 +20,13 @@ export default {
         headers: { ...cors, ...noCache, "Content-Type": "application/json" }
       });
 
+    const getDb = () => {
+      if (!env.DB || typeof env.DB.prepare !== "function") {
+        return null;
+      }
+      return env.DB;
+    };
+
     const toFinite = (v) => {
       if (v === null || v === undefined || v === "") {
         return null;
@@ -92,12 +99,16 @@ export default {
       const gust = toFinite(body.gust);
       const dir = toFinite(body.dir ?? body.wind_dir_deg);
       const rain = toFinite(body.rain ?? body.rain_mm);
-      const pressure = toFinite(body.pressure_hpa);
       const batteryV = toFinite(body.battery_v);
+
+      const db = getDb();
+      if (!db) {
+        return json({ ok: false, error: "DB binding missing" }, 500);
+      }
 
       try {
         // Preferred schema uses ESP payload names directly.
-        await env.DB.prepare(
+        await db.prepare(
           "INSERT INTO readings (device_id, sid, ts, temp, hum, avg, gust, dir, rain, bat, battery_v) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         ).bind(
           deviceId,
@@ -112,62 +123,49 @@ export default {
           bat,
           batteryV
         ).run();
-      } catch {
-        try {
-          // Compatibility schema keeps old names but still captures gust + direction.
-          await env.DB.prepare(
-            "INSERT INTO readings (device_id, ts, temperature_c, humidity, pressure_hpa, wind_kph, gust, wind_dir_deg, rain_mm, battery_v) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-          ).bind(
-            deviceId,
-            ts,
-            temp,
-            hum,
-            pressure,
-            avg,
-            gust,
-            dir,
-            rain,
-            batteryV
-          ).run();
-        } catch {
-          // Final fallback for oldest pre-migration databases.
-          await env.DB.prepare(
-            "INSERT INTO readings (device_id, ts, temperature_c, humidity, pressure_hpa, wind_kph, rain_mm, battery_v) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-          ).bind(
-            deviceId,
-            ts,
-            temp,
-            hum,
-            pressure,
-            avg,
-            rain,
-            batteryV
-          ).run();
-        }
+      } 
+      catch {
+        return json({ ok: false, error: "Database error" }, 500);
       }
-
+    
       return json({ ok: true });
     }
 
     if (url.pathname === "/api/latest" && request.method === "GET") {
-      const db = env.DB.withSession("first-primary");
-      const row = await db.prepare(
-        "SELECT * FROM readings ORDER BY ts DESC LIMIT 1"
-      ).first();
+      const db = getDb();
+      if (!db) {
+        return json({ ok: false, error: "DB binding missing" }, 500);
+      }
 
-      return json(mapRow(row));
+      try {
+        const row = await db.prepare(
+          "SELECT * FROM readings ORDER BY ts DESC LIMIT 1"
+        ).first();
+
+        return json(mapRow(row));
+      } catch {
+        return json({ ok: false, error: "Database error" }, 500);
+      }
     }
 
     if (url.pathname === "/api/history" && request.method === "GET") {
       const hours = Math.max(1, Math.min(168, Number(url.searchParams.get("hours") || 24)));
       const since = Math.floor(Date.now() / 1000) - hours * 3600;
 
-      const db = env.DB.withSession("first-primary");
-      const result = await db.prepare(
-        "SELECT * FROM readings WHERE ts >= ? ORDER BY ts ASC"
-      ).bind(since).all();
+      const db = getDb();
+      if (!db) {
+        return json({ ok: false, error: "DB binding missing" }, 500);
+      }
 
-      return json((result.results || []).map(mapRow));
+      try {
+        const result = await db.prepare(
+          "SELECT * FROM readings WHERE ts >= ? ORDER BY ts ASC"
+        ).bind(since).all();
+
+        return json((result.results || []).map(mapRow));
+      } catch {
+        return json({ ok: false, error: "Database error" }, 500);
+      }
     }
 
     return new Response("Not found", { status: 404, headers: { ...cors, ...noCache } });
