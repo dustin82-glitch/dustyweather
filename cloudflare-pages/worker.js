@@ -55,7 +55,7 @@ export default {
         hum: row.hum ?? row.humidity ?? null,
         avg: row.avg ?? row.wind_kph ?? null,
         gust: row.gust ?? null,
-        dir: row.dir ?? row.wind_dir_deg ?? null,
+        dir: row.dir ?? row.wind_dir_deg ?? row.winddirection ?? null,
         rain: row.rain ?? row.rain_mm ?? null,
         ts: row.ts ?? null,
         device_id: row.device_id ?? row.sid ?? null
@@ -96,8 +96,9 @@ export default {
       const batteryV = toFinite(body.battery_v);
 
       try {
+        // Preferred schema uses ESP payload names directly.
         await env.DB.prepare(
-          "INSERT INTO readings (device_id, sid, ts, temp, hum, avg, gust, dir, rain, bat, temperature_c, humidity, pressure_hpa, wind_kph, rain_mm, battery_v) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+          "INSERT INTO readings (device_id, sid, ts, temp, hum, avg, gust, dir, rain, bat, battery_v) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         ).bind(
           deviceId,
           sid,
@@ -109,27 +110,40 @@ export default {
           dir,
           rain,
           bat,
-          temp,
-          hum,
-          pressure,
-          avg,
-          rain,
           batteryV
         ).run();
       } catch {
-        // Backward-compatible fallback for pre-migration databases.
-        await env.DB.prepare(
-          "INSERT INTO readings (device_id, ts, temperature_c, humidity, pressure_hpa, wind_kph, rain_mm, battery_v) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-        ).bind(
-          deviceId,
-          ts,
-          temp,
-          hum,
-          pressure,
-          avg,
-          rain,
-          batteryV
-        ).run();
+        try {
+          // Compatibility schema keeps old names but still captures gust + direction.
+          await env.DB.prepare(
+            "INSERT INTO readings (device_id, ts, temperature_c, humidity, pressure_hpa, wind_kph, gust, wind_dir_deg, rain_mm, battery_v) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+          ).bind(
+            deviceId,
+            ts,
+            temp,
+            hum,
+            pressure,
+            avg,
+            gust,
+            dir,
+            rain,
+            batteryV
+          ).run();
+        } catch {
+          // Final fallback for oldest pre-migration databases.
+          await env.DB.prepare(
+            "INSERT INTO readings (device_id, ts, temperature_c, humidity, pressure_hpa, wind_kph, rain_mm, battery_v) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+          ).bind(
+            deviceId,
+            ts,
+            temp,
+            hum,
+            pressure,
+            avg,
+            rain,
+            batteryV
+          ).run();
+        }
       }
 
       return json({ ok: true });

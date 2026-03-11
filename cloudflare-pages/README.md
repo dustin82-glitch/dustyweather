@@ -24,12 +24,15 @@ GitHub Auto-Deploy Setup (recommended):
 1. In Cloudflare, create a Pages project name you want to use (for example: dustyweather).
 2. In Cloudflare, create your D1 database and copy its Database ID.
 3. Open cloudflare-pages/wrangler.toml and replace REPLACE_WITH_D1_DATABASE_ID.
-4. In your GitHub repo, add these repository secrets:
-	- CLOUDFLARE_API_TOKEN
-	- CLOUDFLARE_ACCOUNT_ID
-	- CLOUDFLARE_PAGES_PROJECT_NAME
-5. API token permissions should include:
-	- Account, Cloudflare Pages, Edit
-	- Account, Workers Scripts, Edit
-	- Account, D1, Edit (or needed D1 access)
-6. Commit and push. The workflow at .github/workflows/deploy-cloudflare.yml deploys both Worker and Pages on push to main.
+4. Apply schema from cloudflare-pages/schema.sql to D1 (or add missing columns if table exists).
+   - Required ESP-named columns for full ingest: sid, temp, hum, avg, gust, dir, rain, bat.
+   - Legacy columns remain optional for backward compatibility.
+5. In your GitHub repo, add these repository secrets:
+   - CLOUDFLARE_API_TOKEN
+   - CLOUDFLARE_ACCOUNT_ID
+   - CLOUDFLARE_PAGES_PROJECT_NAME
+6. API token permissions should include:
+   - Account, Cloudflare Pages, Edit
+   - Account, Workers Scripts, Edit
+   - Account, D1, Edit (or needed D1 access)
+7. Commit and push. The workflow at .github/workflows/deploy-cloudflare.yml deploys both Worker and Pages on push to main.
