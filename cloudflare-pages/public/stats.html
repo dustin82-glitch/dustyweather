@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Jarvis Weather Stats</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
 <style>
 :root {
     --bg: #f5f5f5;
@@ -59,6 +61,11 @@ h2 {
     gap: 10px;
     align-items: center;
     flex-wrap: wrap;
+}
+.hint {
+    margin-left: auto;
+    color: var(--muted);
+    font-size: 12px;
 }
 select, button {
     font-size: 14px;
@@ -139,6 +146,8 @@ button:hover {
             <option value="168">Last 7 Days</option>
         </select>
         <button id="refreshBtn" type="button">Refresh</button>
+        <button id="resetViewBtn" type="button">Reset View</button>
+        <span class="hint">Drag chart left/right to scroll</span>
     </div>
 
     <div class="chart-card">
@@ -152,6 +161,10 @@ button:hover {
 const API_BASE = "https://weather-api.dustin-popp82.workers.dev";
 
 let chart = null;
+
+if (window.Chart && window.ChartZoom) {
+    Chart.register(window.ChartZoom);
+}
 
 function toNumber(v) {
     const n = Number(v);
@@ -319,6 +332,27 @@ function renderChart(rows) {
                             return `${ctx.dataset.label}: ${Number.isFinite(y) ? y.toFixed(1) : "--"}`;
                         }
                     }
+                },
+                zoom: {
+                    limits: {
+                        x: { min: 0, max: labels.length ? labels.length - 1 : 0 }
+                    },
+                    pan: {
+                        enabled: true,
+                        mode: "x"
+                    },
+                    zoom: {
+                        wheel: {
+                            enabled: true
+                        },
+                        pinch: {
+                            enabled: true
+                        },
+                        drag: {
+                            enabled: false
+                        },
+                        mode: "x"
+                    }
                 }
             }
         }
@@ -350,6 +384,11 @@ async function loadStats() {
 }
 
 document.getElementById("refreshBtn").addEventListener("click", loadStats);
+document.getElementById("resetViewBtn").addEventListener("click", () => {
+    if (chart && typeof chart.resetZoom === "function") {
+        chart.resetZoom();
+    }
+});
 document.getElementById("hoursSelect").addEventListener("change", loadStats);
 window.addEventListener("load", loadStats);
 </script>
