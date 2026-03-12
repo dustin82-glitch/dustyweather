@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jarvis Weather Stats</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+<style>
+:root {
+    --bg: #f5f5f5;
+    --panel: #ffffff;
+    --text: #222;
+    --muted: #666;
+    --line: #ddd;
+    --accent: #2f5f86;
+}
+body {
+    font-family: Arial;
+    margin: 12px;
+    background: var(--bg);
+    color: var(--text);
+}
+.page-shell {
+    width: min(100%, 900px);
+    margin-left: auto;
+    margin-right: auto;
+}
+.top-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+.top-links a {
+    text-decoration: none;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--text);
+    padding: 7px 10px;
+    border-radius: 6px;
+    font-size: 13px;
+}
+h2 {
+    margin: 4px 0;
+}
+.subtitle {
+    margin: 0 0 12px;
+    color: var(--muted);
+    font-size: 13px;
+}
+.controls {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 10px;
+    margin-bottom: 12px;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+select, button {
+    font-size: 14px;
+    padding: 6px 8px;
+}
+button {
+    border: 1px solid var(--line);
+    background: #f8f8f8;
+    border-radius: 6px;
+    cursor: pointer;
+}
+button:hover {
+    background: #efefef;
+}
+.chart-card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 10px;
+}
+.stats-grid {
+    margin-top: 12px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 10px;
+}
+.stat-card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 10px;
+}
+.stat-card h3 {
+    margin: 0 0 8px;
+    font-size: 15px;
+    color: var(--accent);
+}
+.stat-row {
+    display: flex;
+    justify-content: space-between;
+    border-bottom: 1px dashed var(--line);
+    padding: 4px 0;
+    font-size: 14px;
+}
+.stat-row:last-child {
+    border-bottom: none;
+}
+@media (max-width: 640px) {
+    .top-bar {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+}
+</style>
+</head>
+<body>
+<div class="page-shell">
+    <div class="top-bar">
+        <div>
+            <h2>Wind Graph and Weather Stats</h2>
+            <p class="subtitle" id="status">Loading history...</p>
+        </div>
+        <div class="top-links">
+            <a href="index.html">Back to Main</a>
+        </div>
+    </div>
+
+    <div class="controls">
+        <label for="hoursSelect">Window:</label>
+        <select id="hoursSelect">
+            <option value="24">Last 24 Hours</option>
+            <option value="48">Last 48 Hours</option>
+            <option value="72">Last 72 Hours</option>
+            <option value="168">Last 7 Days</option>
+        </select>
+        <button id="refreshBtn" type="button">Refresh</button>
+    </div>
+
+    <div class="chart-card">
+        <canvas id="windChart" height="130"></canvas>
+    </div>
+
+    <div class="stats-grid" id="statsGrid"></div>
+</div>
+
+<script>
+const API_BASE = "https://weather-api.dustin-popp82.workers.dev";
+
+let chart = null;
+
+function toNumber(v) {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+}
+
+function toTs(row) {
+    const ts = Number(row?.ts ?? row?.created_at ?? row?.timestamp);
+    return Number.isFinite(ts) ? ts : null;
+}
+
+function formatLocalTime(tsSec) {
+    if (!Number.isFinite(tsSec)) {
+        return "--";
+    }
+    const d = new Date(tsSec * 1000);
+    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function normalizeRows(payload) {
+    if (Array.isArray(payload)) {
+        return payload;
+    }
+    if (payload && Array.isArray(payload.results)) {
+        return payload.results;
+    }
+    return [];
+}
+
+function summary(values) {
+    const clean = values.filter((v) => Number.isFinite(v));
+    if (!clean.length) {
+        return { min: null, max: null, avg: null };
+    }
+    const min = Math.min(...clean);
+    const max = Math.max(...clean);
+    const avg = clean.reduce((a, b) => a + b, 0) / clean.length;
+    return { min, max, avg };
+}
+
+function rainfallTotal(rows) {
+    const points = rows
+        .map((row) => ({ ts: toTs(row), rain: toNumber(row?.rain ?? row?.rain_mm) }))
+        .filter((p) => p.ts !== null && p.rain !== null)
+        .sort((a, b) => a.ts - b.ts);
+
+    if (points.length < 2) {
+        return points.length === 1 ? 0 : null;
+    }
+
+    let total = 0;
+    for (let i = 1; i < points.length; i += 1) {
+        const delta = points[i].rain - points[i - 1].rain;
+        if (delta > 0) {
+            total += delta;
+        }
+    }
+    return total;
+}
+
+function num(v, digits, unit) {
+    return v === null ? "--" : `${v.toFixed(digits)}${unit}`;
+}
+
+function renderStats(rows, hours) {
+    const avgWind = summary(rows.map((r) => toNumber(r.avg)));
+    const gustWind = summary(rows.map((r) => toNumber(r.gust)));
+    const temp = summary(rows.map((r) => toNumber(r.temp)));
+    const hum = summary(rows.map((r) => toNumber(r.hum)));
+    const rain = rainfallTotal(rows);
+
+    const grid = document.getElementById("statsGrid");
+    grid.innerHTML = `
+        <div class="stat-card">
+            <h3>Wind Avg</h3>
+            <div class="stat-row"><span>Min</span><span>${num(avgWind.min, 1, "kn")}</span></div>
+            <div class="stat-row"><span>Avg</span><span>${num(avgWind.avg, 1, "kn")}</span></div>
+            <div class="stat-row"><span>Max</span><span>${num(avgWind.max, 1, "kn")}</span></div>
+        </div>
+        <div class="stat-card">
+            <h3>Wind Gust</h3>
+            <div class="stat-row"><span>Min</span><span>${num(gustWind.min, 1, "kn")}</span></div>
+            <div class="stat-row"><span>Avg</span><span>${num(gustWind.avg, 1, "kn")}</span></div>
+            <div class="stat-row"><span>Max</span><span>${num(gustWind.max, 1, "kn")}</span></div>
+        </div>
+        <div class="stat-card">
+            <h3>Temperature</h3>
+            <div class="stat-row"><span>Min</span><span>${num(temp.min, 1, "C")}</span></div>
+            <div class="stat-row"><span>Avg</span><span>${num(temp.avg, 1, "C")}</span></div>
+            <div class="stat-row"><span>Max</span><span>${num(temp.max, 1, "C")}</span></div>
+        </div>
+        <div class="stat-card">
+            <h3>Humidity</h3>
+            <div class="stat-row"><span>Min</span><span>${num(hum.min, 0, "%")}</span></div>
+            <div class="stat-row"><span>Avg</span><span>${num(hum.avg, 0, "%")}</span></div>
+            <div class="stat-row"><span>Max</span><span>${num(hum.max, 0, "%")}</span></div>
+        </div>
+        <div class="stat-card">
+            <h3>Rainfall</h3>
+            <div class="stat-row"><span>Total (${hours}h)</span><span>${num(rain, 1, "mm")}</span></div>
+        </div>
+    `;
+}
+
+function renderChart(rows) {
+    const sorted = rows
+        .map((r) => ({ ts: toTs(r), avg: toNumber(r.avg), gust: toNumber(r.gust) }))
+        .filter((p) => p.ts !== null)
+        .sort((a, b) => a.ts - b.ts);
+
+    const labels = sorted.map((p) => formatLocalTime(p.ts));
+    const avgData = sorted.map((p) => p.avg);
+    const gustData = sorted.map((p) => p.gust);
+
+    const ctx = document.getElementById("windChart").getContext("2d");
+
+    if (chart) {
+        chart.destroy();
+    }
+
+    chart = new Chart(ctx, {
+        type: "line",
+        data: {
+            labels,
+            datasets: [
+                {
+                    label: "Wind Avg (kn)",
+                    data: avgData,
+                    borderColor: "#2f5f86",
+                    backgroundColor: "rgba(47,95,134,0.15)",
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    tension: 0.25
+                },
+                {
+                    label: "Wind Gust (kn)",
+                    data: gustData,
+                    borderColor: "#b45f06",
+                    backgroundColor: "rgba(180,95,6,0.10)",
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    tension: 0.2
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            interaction: { mode: "index", intersect: false },
+            scales: {
+                x: {
+                    ticks: { maxTicksLimit: 12 }
+                },
+                y: {
+                    beginAtZero: true,
+                    title: { display: true, text: "knots" }
+                }
+            },
+            plugins: {
+                legend: { display: true },
+                tooltip: {
+                    callbacks: {
+                        label: (ctx) => {
+                            const y = ctx.parsed.y;
+                            return `${ctx.dataset.label}: ${Number.isFinite(y) ? y.toFixed(1) : "--"}`;
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+async function loadStats() {
+    const hours = Number(document.getElementById("hoursSelect").value || 24);
+    const status = document.getElementById("status");
+
+    try {
+        status.innerText = `Loading ${hours}h of data...`;
+        const r = await fetch(`${API_BASE}/api/history?hours=${hours}&t=${Date.now()}`, { cache: "no-store" });
+        if (!r.ok) {
+            throw new Error(`HTTP ${r.status}`);
+        }
+        const payload = await r.json();
+        const rows = normalizeRows(payload);
+
+        renderChart(rows);
+        renderStats(rows, hours);
+
+        const latestTs = rows.length ? toTs(rows[rows.length - 1]) : null;
+        status.innerText = `Loaded ${rows.length} points${latestTs ? ` | Last update ${new Date(latestTs * 1000).toLocaleString()}` : ""}`;
+    } catch (err) {
+        status.innerText = `Stats fetch error: ${err.message}`;
+        console.error("Stats load failed:", err);
+    }
+}
+
+document.getElementById("refreshBtn").addEventListener("click", loadStats);
+document.getElementById("hoursSelect").addEventListener("change", loadStats);
+window.addEventListener("load", loadStats);
+</script>
+</body>
+</html>

@@ -39,6 +39,23 @@ h2 {
     color: var(--muted);
     font-size: 13px;
 }
+.top-nav {
+    display: flex;
+    justify-content: flex-end;
+    margin: 0 0 8px;
+}
+.top-nav a {
+    text-decoration: none;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--text);
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 13px;
+}
+.top-nav a:hover {
+    background: #f0f0f0;
+}
 table, .gauge-wrap {
     width: 100%;
     max-width: 100%;
@@ -53,6 +70,7 @@ td { padding: 6px 10px; border-bottom: 1px solid var(--line); }
 
 <body>
 <div class="page-shell" id="pageShell">
+<div class="top-nav"><a href="stats.html">Wind Graph and Stats</a></div>
 <h2>Jarvis Weather</h2>
 <p class="subtitle" id="status">Loading cloud data...</p>
 <table>
@@ -63,7 +81,7 @@ td { padding: 6px 10px; border-bottom: 1px solid var(--line); }
 <tr><td>Wind Gust</td><td id="gust">--</td></tr>
 <tr><td>Wind Avg</td><td id="avg">--</td></tr>
 <tr><td>Wind Direction</td><td id="dir">--</td></tr>
-<tr><td>Rainfall</td><td id="rain">--</td></tr>
+<tr><td>Rainfall (Last 24h)</td><td id="rain">--</td></tr>
 </table>
 <br>
 <div class="gauge-wrap">
@@ -94,6 +112,10 @@ td { padding: 6px 10px; border-bottom: 1px solid var(--line); }
 <script>
 const API_BASE = "https://weather-api.dustin-popp82.workers.dev";
 const API_DEVICE_ID = "";
+const RAIN_REFRESH_MS = 60000;
+
+let cachedRain24h = null;
+let lastRainFetchMs = 0;
 
 const windGauge = () => (document.gauges && document.gauges.get("windGauge")) || null;
 
@@ -206,11 +228,65 @@ function normalizeRow(payload) {
     return payload;
 }
 
+function rowTs(row) {
+    const ts = Number(row?.ts ?? row?.created_at ?? row?.timestamp);
+    return Number.isFinite(ts) ? ts : null;
+}
+
+function rowRainValue(row) {
+    const n = toNumber(row?.rain ?? row?.rain_mm);
+    return n === null ? null : n;
+}
+
+function calculateRainfallFromSeries(rows) {
+    if (!Array.isArray(rows) || rows.length === 0) {
+        return null;
+    }
+
+    const points = rows
+        .map((row) => ({ ts: rowTs(row), rain: rowRainValue(row) }))
+        .filter((p) => p.ts !== null && p.rain !== null)
+        .sort((a, b) => a.ts - b.ts);
+
+    if (points.length < 2) {
+        return points.length === 1 ? 0 : null;
+    }
+
+    // Treat rain as cumulative when possible and sum only positive deltas.
+    let total = 0;
+    for (let i = 1; i < points.length; i += 1) {
+        const delta = points[i].rain - points[i - 1].rain;
+        if (delta > 0) {
+            total += delta;
+        }
+    }
+    return total;
+}
+
+async function refreshRain24h(force = false) {
+    const now = Date.now();
+    if (!force && now - lastRainFetchMs < RAIN_REFRESH_MS) {
+        return cachedRain24h;
+    }
+
+    const r = await fetch(`${API_BASE}/api/history?hours=24&t=${now}`, { cache: "no-store" });
+    if (!r.ok) {
+        throw new Error(`Rain history HTTP ${r.status}`);
+    }
+
+    const payload = await r.json();
+    const rows = Array.isArray(payload) ? payload : [];
+    cachedRain24h = calculateRainfallFromSeries(rows);
+    lastRainFetchMs = now;
+    return cachedRain24h;
+}
+
 async function updateFromCloud() {
     const status = document.getElementById("status");
 
     try {
-        const r = await fetch(`${API_BASE}/api/latest`, { cache: "no-store" });
+        // Force a fresh read each poll to avoid stale edge/browser cache.
+        const r = await fetch(`${API_BASE}/api/latest?t=${Date.now()}`, { cache: "no-store" });
         if (!r.ok) {
             throw new Error(`HTTP ${r.status}`);
         }
@@ -225,23 +301,29 @@ async function updateFromCloud() {
         const sourceId = d.device_id || d.sid || "unknown";
         setText("status", `Updated: ${ts} | Source: ${sourceId}`);
 
-        const tempC = toNumber(d.temp ?? d.temperature_c);
-        const humidity = toNumber(d.hum ?? d.humidity);
-        const rainMm = toNumber(d.rain ?? d.rain_mm);
-
+        // Match Worker output field names first, then legacy aliases.
+        const sid = d.sid ?? d.device_id;
+        const tempC = toNumber(d.temp);
+        const humidity = toNumber(d.hum);
         const windAvgKn = toNumber(d.avg);
         const windGustKn = toNumber(d.gust);
+        const windDir = d.dir;
+        let rainMm24 = cachedRain24h;
 
-        const windDir = d.dir ?? d.wind_dir_deg ?? d.wind_dir;
+        try {
+            rainMm24 = await refreshRain24h(false);
+        } catch (historyErr) {
+            console.warn("Rain history update failed:", historyErr);
+        }
 
-        setText("sid", d.sid || d.device_id || "--");
+        setText("sid", sid ?? "--");
         setText("bat", toBatteryText(d));
         setText("temp", tempC === null ? "--" : `${tempC.toFixed(1)}°C`);
         setText("hum", humidity === null ? "--" : `${humidity}%`);
         setText("gust", windGustKn === null ? "--" : `${windGustKn.toFixed(1)}kn`);
         setText("avg", windAvgKn === null ? "--" : `${windAvgKn.toFixed(1)}kn`);
         setText("dir", windDir ?? "--");
-        setText("rain", rainMm === null ? "--" : `${rainMm.toFixed(1)}mm`);
+        setText("rain", rainMm24 === null ? "--" : `${rainMm24.toFixed(1)}mm`);
 
         const gauge = windGauge();
         if (gauge) {
@@ -259,6 +341,7 @@ window.addEventListener("load", () => {
     layoutPage();
     setTimeout(layoutPage, 120);
     setTimeout(layoutPage, 400);
+    refreshRain24h(true).catch((err) => console.warn("Initial rain history load failed:", err));
     updateFromCloud();
     setInterval(updateFromCloud, 2000);
 });

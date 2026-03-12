@@ -36,6 +36,6 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           projectName: ${{ secrets.CLOUDFLARE_PAGES_PROJECT_NAME }}
-          directory: cloudflare-pages
+          directory: cloudflare-pages/public
           branch: main
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}

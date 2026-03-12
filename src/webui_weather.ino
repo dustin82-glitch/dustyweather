@@ -115,7 +115,7 @@ void handleData() {
   json += "\"dir\":" + String(latestWindDir) + ",";
   json += "\"rain\":" + String(latestRain, 1);
   json += "}";
-
+  Serial.println("Serving /data: " + json);
   server.send(200, "application/json", json);
 }
 
@@ -128,7 +128,6 @@ String buildCloudPayload() {
   // Keep cloud payload aligned with local /data names so fields are easy to trace.
   float gustKnots = latestWindGust * 1.94384f;
   float avgKnots  = latestWindAvg  * 1.94384f;
-
   String json = "{";
   json += "\"sid\":\"" + String(latestSensorId, HEX) + "\",";
   json += "\"bat\":\"" + String(latestBattery ? "Yes" : "No") + "\",";
@@ -137,9 +136,9 @@ String buildCloudPayload() {
   json += "\"avg\":" + String(avgKnots, 1) + ",";
   json += "\"gust\":" + String(gustKnots, 1) + ",";
   json += "\"dir\":" + String(latestWindDir) + ",";
-  json += "\"rain\":" + String(latestRain, 1) + ",";
-  
-  json += "}";
+  json += "\"rain\":" + String(latestRain, 1);
+  Serial.println("Built cloud payload: " + json);
+  json += "}";  
   return json;
 }
 
@@ -301,16 +300,7 @@ bool decodeBresser6In1Full(const uint8_t* msg, size_t len) {
   }
 
   queueCloudUpload();
-
-  Serial.printf("[WX] ID=%08lX Bat=%s Temp=%.1f Hum=%d WindAvg=%.1f WindGust=%.1f Dir=%d Rain=%.1f\n",
-                static_cast<unsigned long>(id),
-                batteryOk ? "Yes" : "No",
-                tempOk ? tempC : latestTemp,
-                humidity,
-                windAvg,
-                windGust,
-                windDir,
-                rainMm);
+ 
 
   return true;
 }

@@ -5,5 +5,5 @@ workers_dev = true
 
 [[d1_databases]]
 binding = "DB"
-database_name = "dustyweather-db"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_name = "dustyweather"
+database_id = "6d151bfc-483d-450f-b8e4-45580d46c092"

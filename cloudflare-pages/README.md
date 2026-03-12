@@ -13,7 +13,7 @@ Before deploy:
 Deploy on Cloudflare Pages:
 1. Cloudflare dashboard, Workers and Pages, Create, Pages.
 2. Use Direct Upload.
-3. Upload the files in this folder.
+3. Upload files from cloudflare-pages/public.
 4. Open the Pages URL to view your cloud dashboard.
 
 Notes:
@@ -36,3 +36,4 @@ GitHub Auto-Deploy Setup (recommended):
    - Account, Workers Scripts, Edit
    - Account, D1, Edit (or needed D1 access)
 7. Commit and push. The workflow at .github/workflows/deploy-cloudflare.yml deploys both Worker and Pages on push to main.
+8. Pages deploy source is cloudflare-pages/public so worker.js, schema.sql, and wrangler.toml are not published as site assets.
