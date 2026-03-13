@@ -1,6 +1,7 @@
 # rgyc_reader.py
 from io import BytesIO
 from datetime import datetime
+import re
 from PIL import Image, ImageOps, ImageEnhance, ImageFilter
 import pytesseract
 from wind_direction import WindDirectionDetector
@@ -30,11 +31,11 @@ def parse_number(value):
     s = str(value).strip()
     if not s:
         return None
-    cleaned = "".join(ch for ch in s if ch in "0123456789.-")
-    if cleaned in {"", ".", "-", "-."}:
+    match = re.search(r"-?\d+(?:\.\d+)?", s)
+    if not match:
         return None
     try:
-        return float(cleaned)
+        return float(match.group(0))
     except ValueError:
         return None
 

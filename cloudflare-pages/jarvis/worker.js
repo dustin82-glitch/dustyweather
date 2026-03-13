@@ -250,7 +250,7 @@ export default {
       } catch {
         return json({ ok: false, error: "Database error" }, 500);
       }
-    }
+    } 
 
     if (url.pathname === "/api/rgyc/history" && request.method === "GET") {
       const hours = Math.max(1, Math.min(168, Number(url.searchParams.get("hours") || 24)));

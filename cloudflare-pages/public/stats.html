@@ -340,13 +340,14 @@ function renderStats(rows, hours) {
 
 function renderChart(rows) {
     const sorted = rows
-        .map((r) => ({ ts: toTs(r), avg: toNumber(r.avg), gust: toNumber(r.gust) }))
+        .map((r) => ({ ts: toTs(r), avg: toNumber(r.avg), gust: toNumber(r.gust), dir: toNumber(r.dir) }))
         .filter((p) => p.ts !== null)
         .sort((a, b) => a.ts - b.ts);
 
     const labels = sorted.map((p) => formatLocalTime(p.ts));
     const avgData = sorted.map((p) => p.avg);
     const gustData = sorted.map((p) => p.gust);
+    const dirData = sorted.map((p) => p.dir);
 
     const ctx = document.getElementById("windChart").getContext("2d");
 
@@ -376,6 +377,17 @@ function renderChart(rows) {
                     borderWidth: 2,
                     pointRadius: 0,
                     tension: 0.2
+                },
+                {
+                    label: "Wind Direction (deg)",
+                    data: dirData,
+                    yAxisID: "yDir",
+                    borderColor: "#7a3bb2",
+                    backgroundColor: "rgba(122,59,178,0.10)",
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    tension: 0.1,
+                    spanGaps: true
                 }
             ]
         },
@@ -390,6 +402,14 @@ function renderChart(rows) {
                 y: {
                     beginAtZero: true,
                     title: { display: true, text: "knots" }
+                },
+                yDir: {
+                    position: "right",
+                    min: 0,
+                    max: 360,
+                    grid: { drawOnChartArea: false },
+                    ticks: { stepSize: 45 },
+                    title: { display: true, text: "degrees" }
                 }
             },
             plugins: {
@@ -398,7 +418,11 @@ function renderChart(rows) {
                     callbacks: {
                         label: (ctx) => {
                             const y = ctx.parsed.y;
-                            return `${ctx.dataset.label}: ${Number.isFinite(y) ? y.toFixed(1) : "--"}`;
+                            if (!Number.isFinite(y)) {
+                                return `${ctx.dataset.label}: --`;
+                            }
+                            const unit = ctx.dataset.yAxisID === "yDir" ? "deg" : "kn";
+                            return `${ctx.dataset.label}: ${y.toFixed(1)}${unit}`;
                         }
                     }
                 },

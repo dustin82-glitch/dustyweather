@@ -3,6 +3,7 @@ Polls RGYC wind image every minute, extracts wind speed and direction from blue 
 """
 import os
 import json
+import re
 
 import requests
 from io import BytesIO
@@ -14,7 +15,7 @@ import subprocess
 from datetime import datetime
 import time
 from PIL import Image, ImageTk, ImageOps, ImageEnhance, ImageFilter, ImageDraw, ImageFont
-
+last_wind_direction = None
 # Set this to your installed tesseract.exe path if not in PATH
 # Example path: `C:\\Program Files\\Tesseract-OCR\\tesseract.exe`
 pytesseract.pytesseract.tesseract_cmd = r"C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
@@ -26,7 +27,8 @@ WORKER_ENDPOINT = os.environ.get(
     "RGYC_WORKER_ENDPOINT",
     "https://weather-api.dustin-popp82.workers.dev/rgyc-wind"
 )
-WORKER_API_KEY = os.environ.get("RGYC_WORKER_API_KEY") or os.environ.get("DEVICE_TOKEN")
+#WORKER_API_KEY = os.environ.get("RGYC_WORKER_API_KEY") or os.environ.get("DEVICE_TOKEN")
+WORKER_API_KEY = "Extasea10007!"
 
 
 # Verify tesseract is callable
@@ -89,11 +91,12 @@ def parse_number(value):
     s = str(value).strip()
     if not s:
         return None
-    cleaned = "".join(ch for ch in s if ch in "0123456789.-")
-    if cleaned in {"", ".", "-", "-."}:
+    # OCR often returns noisy strings like "12.8." or "165°".
+    match = re.search(r"-?\d+(?:\.\d+)?", s)
+    if not match:
         return None
     try:
-        return float(cleaned)
+        return float(match.group(0))
     except ValueError:
         return None
 
@@ -151,7 +154,12 @@ def poll_loop(start_immediately: bool = True):
     immediately (downloads & processes an image) even if not on a minute boundary.
     Subsequent iterations align to the minute boundary as before.
     """
+    global last_wind_direction
     first_run = True
+
+    if not WORKER_API_KEY:
+        print("[Worker] Warning: RGYC_WORKER_API_KEY (or DEVICE_TOKEN) is not set; requests will return 401.")
+
     while True:
         try:
             if first_run and start_immediately:
@@ -166,7 +174,15 @@ def poll_loop(start_immediately: bool = True):
 
             img = fetch_image()
             wind_speed = extract_text(img, CROP_WIND_SPEED)
-            direction = extract_text(img, CROP_DIRECTION)
+
+            direction_text = extract_text(img, CROP_DIRECTION)
+            if direction_text in (None, ""):
+                direction_text = last_wind_direction
+            else:
+                last_wind_direction = direction_text
+
+
+
             max_val = extract_text(img, CROP_MAX)
             min_val = extract_text(img, CROP_MIN)
             avg_val = extract_text(img, CROP_AVG)
@@ -178,7 +194,7 @@ def poll_loop(start_immediately: bool = True):
             now_utc = datetime.now(timezone.utc)
             ts_utc = now_utc.strftime('%Y-%m-%dT%H:%M:%SZ')
 
-            print(f"[{ts_local}] Wind: {wind_speed} knots | Direction: {direction}")
+            print(f"[{ts_local}] Wind: {wind_speed} knots | Direction: {direction_text}")
             print(f"                       Max:  {max_val} knots | Min:  {min_val} knots | Avg:  {avg_val} knots")
 
             payload = {
@@ -187,12 +203,16 @@ def poll_loop(start_immediately: bool = True):
                 "time_local": ts_local,
                 "time_utc": ts_utc,
                 "wind_speed_kts": parse_number(wind_speed),
-                "wind_dir": parse_number(direction),
+                "wind_dir": parse_number(direction_text),
                 "max_kts": parse_number(max_val),
                 "min_kts": parse_number(min_val),
                 "avg_kts": parse_number(avg_val),
                 "image_url": IMAGE_URL,
             }
+
+            # If speed OCR fails, fall back to avg value so records still carry a usable wind speed.
+            if payload["wind_speed_kts"] is None:
+                payload["wind_speed_kts"] = payload["avg_kts"]
 
             send_reading_to_worker(payload)
 
