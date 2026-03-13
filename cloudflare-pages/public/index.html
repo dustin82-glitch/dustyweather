@@ -41,8 +41,19 @@ h2 {
 }
 .top-nav {
     display: flex;
-    justify-content: flex-end;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
     margin: 0 0 8px;
+}
+.top-nav-left {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.top-nav-left label {
+    color: var(--muted);
+    font-size: 13px;
 }
 .top-nav a {
     text-decoration: none;
@@ -55,6 +66,10 @@ h2 {
 }
 .top-nav a:hover {
     background: #f0f0f0;
+}
+select {
+    font-size: 13px;
+    padding: 6px 8px;
 }
 table, .gauge-wrap {
     width: 100%;
@@ -70,8 +85,17 @@ td { padding: 6px 10px; border-bottom: 1px solid var(--line); }
 
 <body>
 <div class="page-shell" id="pageShell">
-<div class="top-nav"><a href="stats.html">Wind Graph and Stats</a></div>
-<h2>Jarvis Weather</h2>
+<div class="top-nav">
+    <div class="top-nav-left">
+        <label for="locationSelect">Location:</label>
+        <select id="locationSelect">
+            <option value="jarvis">Jarvis</option>
+            <option value="rgyc">RGYC Beacon</option>
+        </select>
+    </div>
+    <a href="stats.html">Wind Graph and Stats</a>
+</div>
+<h2 id="pageTitle">Jarvis Weather</h2>
 <p class="subtitle" id="status">Loading cloud data...</p>
 <table>
 <tr><td>Sensor ID</td><td id="sid">--</td></tr>
@@ -81,7 +105,7 @@ td { padding: 6px 10px; border-bottom: 1px solid var(--line); }
 <tr><td>Wind Gust</td><td id="gust">--</td></tr>
 <tr><td>Wind Avg</td><td id="avg">--</td></tr>
 <tr><td>Wind Direction</td><td id="dir">--</td></tr>
-<tr><td>Rainfall (Last 24h)</td><td id="rain">--</td></tr>
+<tr><td id="rainLabel">Rainfall (Last 24h)</td><td id="rain">--</td></tr>
 </table>
 <br>
 <div class="gauge-wrap">
@@ -113,6 +137,24 @@ td { padding: 6px 10px; border-bottom: 1px solid var(--line); }
 const API_BASE = "https://weather-api.dustin-popp82.workers.dev";
 const API_DEVICE_ID = "";
 const RAIN_REFRESH_MS = 60000;
+const LOCATION_KEY = "weatherLocation";
+
+const LOCATION_CONFIG = {
+    jarvis: {
+        label: "Jarvis",
+        title: "Jarvis Weather",
+        latestPath: "/api/latest",
+        historyPath: "/api/history",
+        supportsRain: true
+    },
+    rgyc: {
+        label: "RGYC Beacon",
+        title: "RGYC Weather",
+        latestPath: "/api/rgyc/latest",
+        historyPath: "/api/rgyc/history",
+        supportsRain: false
+    }
+};
 
 let cachedRain24h = null;
 let lastRainFetchMs = 0;
@@ -152,6 +194,41 @@ function setText(id, value) {
     const el = document.getElementById(id);
     if (el) {
         el.innerText = value;
+    }
+}
+
+function getSelectedLocation() {
+    const selected = localStorage.getItem(LOCATION_KEY) || "jarvis";
+    return LOCATION_CONFIG[selected] ? selected : "jarvis";
+}
+
+function getLocationConfig() {
+    return LOCATION_CONFIG[getSelectedLocation()];
+}
+
+function getLatestUrl() {
+    const cfg = getLocationConfig();
+    return `${API_BASE}${cfg.latestPath}`;
+}
+
+function getHistoryUrl(hours) {
+    const cfg = getLocationConfig();
+    return `${API_BASE}${cfg.historyPath}?hours=${hours}&t=${Date.now()}`;
+}
+
+function applyLocationUi() {
+    const cfg = getLocationConfig();
+    const pageTitle = document.getElementById("pageTitle");
+    const rainLabel = document.getElementById("rainLabel");
+    const locationSelect = document.getElementById("locationSelect");
+    if (pageTitle) {
+        pageTitle.innerText = cfg.title;
+    }
+    if (rainLabel) {
+        rainLabel.innerText = cfg.supportsRain ? "Rainfall (Last 24h)" : "Rainfall (Last 24h)";
+    }
+    if (locationSelect) {
+        locationSelect.value = getSelectedLocation();
     }
 }
 
@@ -264,12 +341,17 @@ function calculateRainfallFromSeries(rows) {
 }
 
 async function refreshRain24h(force = false) {
+    const cfg = getLocationConfig();
+    if (!cfg.supportsRain) {
+        return null;
+    }
+
     const now = Date.now();
     if (!force && now - lastRainFetchMs < RAIN_REFRESH_MS) {
         return cachedRain24h;
     }
 
-    const r = await fetch(`${API_BASE}/api/history?hours=24&t=${now}`, { cache: "no-store" });
+    const r = await fetch(getHistoryUrl(24), { cache: "no-store" });
     if (!r.ok) {
         throw new Error(`Rain history HTTP ${r.status}`);
     }
@@ -283,10 +365,11 @@ async function refreshRain24h(force = false) {
 
 async function updateFromCloud() {
     const status = document.getElementById("status");
+    const cfg = getLocationConfig();
 
     try {
         // Force a fresh read each poll to avoid stale edge/browser cache.
-        const r = await fetch(`${API_BASE}/api/latest?t=${Date.now()}`, { cache: "no-store" });
+        const r = await fetch(`${getLatestUrl()}?t=${Date.now()}`, { cache: "no-store" });
         if (!r.ok) {
             throw new Error(`HTTP ${r.status}`);
         }
@@ -299,7 +382,7 @@ async function updateFromCloud() {
 
         const ts = d.ts || d.created_at || d.timestamp || "now";
         const sourceId = d.device_id || d.sid || "unknown";
-        setText("status", `Updated: ${ts} | Source: ${sourceId}`);
+        setText("status", `Location: ${cfg.label} | Updated: ${ts} | Source: ${sourceId}`);
 
         // Match Worker output field names first, then legacy aliases.
         const sid = d.sid ?? d.device_id;
@@ -323,7 +406,7 @@ async function updateFromCloud() {
         setText("gust", windGustKn === null ? "--" : `${windGustKn.toFixed(1)}kn`);
         setText("avg", windAvgKn === null ? "--" : `${windAvgKn.toFixed(1)}kn`);
         setText("dir", windDir ?? "--");
-        setText("rain", rainMm24 === null ? "--" : `${rainMm24.toFixed(1)}mm`);
+        setText("rain", rainMm24 === null ? "N/A" : `${rainMm24.toFixed(1)}mm`);
 
         const gauge = windGauge();
         if (gauge) {
@@ -338,12 +421,26 @@ async function updateFromCloud() {
 }
 
 window.addEventListener("load", () => {
+    applyLocationUi();
+
     layoutPage();
     setTimeout(layoutPage, 120);
     setTimeout(layoutPage, 400);
     refreshRain24h(true).catch((err) => console.warn("Initial rain history load failed:", err));
     updateFromCloud();
     setInterval(updateFromCloud, 2000);
+
+    const locationSelect = document.getElementById("locationSelect");
+    if (locationSelect) {
+        locationSelect.addEventListener("change", () => {
+            localStorage.setItem(LOCATION_KEY, locationSelect.value);
+            cachedRain24h = null;
+            lastRainFetchMs = 0;
+            applyLocationUi();
+            refreshRain24h(true).catch((err) => console.warn("Rain history load failed:", err));
+            updateFromCloud();
+        });
+    }
 });
 window.addEventListener("resize", layoutPage);
 window.addEventListener("orientationchange", layoutPage);

@@ -5,7 +5,7 @@ export default {
     const cors = {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type,X-Device-Token"
+      "Access-Control-Allow-Headers": "Content-Type,X-Device-Token,Authorization"
     };
 
     const noCache = {
@@ -24,7 +24,7 @@ export default {
       if (!env.DB || typeof env.DB.prepare !== "function") {
         return null;
       }
-      return env.DB;
+      return env.DB;A
     };
 
     const toFinite = (v) => {
@@ -32,6 +32,21 @@ export default {
         return null;
       }
       const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
+
+    const toFiniteLoose = (v) => {
+      if (v === null || v === undefined || v === "") {
+        return null;
+      }
+      if (typeof v === "number") {
+        return Number.isFinite(v) ? v : null;
+      }
+      const cleaned = String(v).replace(/[^0-9.+-]/g, "");
+      if (!cleaned) {
+        return null;
+      }
+      const n = Number(cleaned);
       return Number.isFinite(n) ? n : null;
     };
 
@@ -131,6 +146,55 @@ export default {
       return json({ ok: true });
     }
 
+    if (url.pathname === "/rgyc-wind" && request.method === "POST") {
+      const authHeader = request.headers.get("Authorization") || "";
+      const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+      const expectedToken = env.RGYC_TOKEN || env.DEVICE_TOKEN;
+
+      if (!bearer || bearer !== expectedToken) {
+        return new Response("Unauthorized", { status: 401, headers: { ...cors, ...noCache } });
+      }
+
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return new Response("Bad JSON", { status: 400, headers: { ...cors, ...noCache } });
+      }
+
+      const nowTs = Math.floor(Date.now() / 1000);
+      const parsedUtc = Date.parse(String(body.time_utc || ""));
+      const ts = Number.isFinite(parsedUtc) ? Math.floor(parsedUtc / 1000) : nowTs;
+      const deviceId = String(body.device_id ?? "rgyc-beacon");
+      const sid = String(body.sid ?? body.source ?? "rgyc_beacon");
+
+      const avg = toFiniteLoose(body.avg_kts ?? body.wind_speed_kts);
+      const gust = toFiniteLoose(body.max_kts ?? body.gust_kts);
+      const dir = toFiniteLoose(body.wind_dir);
+
+      const db = getDb();
+      if (!db) {
+        return json({ ok: false, error: "DB binding missing" }, 500);
+      }
+
+      try {
+        await db.prepare(
+          "INSERT INTO readings (device_id, sid, ts, avg, gust, dir) VALUES (?, ?, ?, ?, ?, ?)"
+        ).bind(
+          deviceId,
+          sid,
+          ts,
+          avg,
+          gust,
+          dir
+        ).run();
+      } catch {
+        return json({ ok: false, error: "Database error" }, 500);
+      }
+
+      return json({ ok: true, ts, sid });
+    }
+
     if (url.pathname === "/api/latest" && request.method === "GET") {
       const db = getDb();
       if (!db) {
@@ -139,7 +203,7 @@ export default {
 
       try {
         const row = await db.prepare(
-          "SELECT * FROM readings ORDER BY ts DESC LIMIT 1"
+          "SELECT * FROM readings WHERE sid IS NULL OR sid != 'rgyc_beacon' ORDER BY ts DESC LIMIT 1"
         ).first();
 
         return json(mapRow(row));
@@ -159,7 +223,44 @@ export default {
 
       try {
         const result = await db.prepare(
-          "SELECT * FROM readings WHERE ts >= ? ORDER BY ts ASC"
+          "SELECT * FROM readings WHERE ts >= ? AND (sid IS NULL OR sid != 'rgyc_beacon') ORDER BY ts ASC"
+        ).bind(since).all();
+
+        return json((result.results || []).map(mapRow));
+      } catch {
+        return json({ ok: false, error: "Database error" }, 500);
+      }
+    }
+
+    if (url.pathname === "/api/rgyc/latest" && request.method === "GET") {
+      const db = getDb();
+      if (!db) {
+        return json({ ok: false, error: "DB binding missing" }, 500);
+      }
+
+      try {
+        const row = await db.prepare(
+          "SELECT * FROM readings WHERE sid = 'rgyc_beacon' ORDER BY ts DESC LIMIT 1"
+        ).first();
+
+        return json(mapRow(row));
+      } catch {
+        return json({ ok: false, error: "Database error" }, 500);
+      }
+    }
+
+    if (url.pathname === "/api/rgyc/history" && request.method === "GET") {
+      const hours = Math.max(1, Math.min(168, Number(url.searchParams.get("hours") || 24)));
+      const since = Math.floor(Date.now() / 1000) - hours * 3600;
+
+      const db = getDb();
+      if (!db) {
+        return json({ ok: false, error: "DB binding missing" }, 500);
+      }
+
+      try {
+        const result = await db.prepare(
+          "SELECT * FROM readings WHERE ts >= ? AND sid = 'rgyc_beacon' ORDER BY ts ASC"
         ).bind(since).all();
 
         return json((result.results || []).map(mapRow));

@@ -1,15 +1,16 @@
 # rgyc_reader.py
-import requests
 from io import BytesIO
 from datetime import datetime
-from PIL import Image, ImageOps, ImageEnhance, ImageFilter, ImageDraw, ImageFont
+from PIL import Image, ImageOps, ImageEnhance, ImageFilter
 import pytesseract
 from wind_direction import WindDirectionDetector
-import subprocess
 import os
 import requests
 
-WORKER_ENDPOINT = "https://rgycno10wind.dustin-popp82.workers.dev/rgyc-wind"  # same as in rgyc poll.py
+WORKER_ENDPOINT = os.environ.get(
+    "RGYC_WORKER_ENDPOINT",
+    "https://weather-api.dustin-popp82.workers.dev/rgyc-wind"
+)
 WORKER_API_KEY = os.environ.get("RGYC_WORKER_API_KEY")
 
 
@@ -21,6 +22,21 @@ CROP_WIND_SPEED = (152, 189, 268, 251)
 CROP_DIRECTION  = (613, 178, 678, 203)
 
 OCR_CONFIG = "--psm 7 -c tessedit_char_whitelist=0123456789.°"
+
+
+def parse_number(value):
+    if value is None:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    cleaned = "".join(ch for ch in s if ch in "0123456789.-")
+    if cleaned in {"", ".", "-", "-."}:
+        return None
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
 
 def preprocess_region(region: Image.Image) -> Image.Image:
     rgb = region.convert("RGB")
@@ -64,8 +80,9 @@ def get_rgyc_reading():
         "time": time_local,             # keep for backward compatibility
         "time_utc": time_utc,
         "source": "rgyc_beacon",
-        "wind_speed_kts": wind_speed,
-        "wind_dir": angle,              # numeric degrees
+        "device_id": "rgyc-beacon",
+        "wind_speed_kts": parse_number(wind_speed),
+        "wind_dir": parse_number(angle),              # numeric degrees
         "image_url": IMAGE_URL,
     }
 

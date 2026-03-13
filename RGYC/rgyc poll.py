@@ -21,8 +21,11 @@ pytesseract.pytesseract.tesseract_cmd = r"C:\\Program Files\\Tesseract-OCR\\tess
 
 
 # Cloudflare Worker endpoint and API key
-# NOTE: The Worker code is mounted at the /rgyc-wind path, not /api/latest.
-WORKER_ENDPOINT = "https://rgycno10wind.dustin-popp82.workers.dev/rgyc-wind"
+# Default points to the Jarvis worker RGYC ingest path in this repo.
+WORKER_ENDPOINT = os.environ.get(
+    "RGYC_WORKER_ENDPOINT",
+    "https://weather-api.dustin-popp82.workers.dev/rgyc-wind"
+)
 WORKER_API_KEY = os.environ.get("RGYC_WORKER_API_KEY")  # set in your OS env
 
 
@@ -79,6 +82,21 @@ def preprocess_region(region: Image.Image) -> Image.Image:
 # OCR config for digits + decimal + degree symbol
 OCR_CONFIG = "--psm 7 -c tessedit_char_whitelist=0123456789.°"
 
+
+def parse_number(value):
+    if value is None:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    cleaned = "".join(ch for ch in s if ch in "0123456789.-")
+    if cleaned in {"", ".", "-", "-."}:
+        return None
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
+
 def fetch_image():
     """
     Downloads the latest wind image from RGYC.
@@ -104,7 +122,8 @@ def send_reading_to_worker(payload: dict):
     if WORKER_API_KEY:
         headers["Authorization"] = f"Bearer {WORKER_API_KEY}"
 
-    print(f"[Worker] POST {WORKER_ENDPOINT} payload={json.dumps(payload, default=str)[:200]} headers={{'Authorization': '***' if WORKER_API_KEY else None}}")
+    auth_state = "set" if WORKER_API_KEY else "missing"
+    print(f"[Worker] POST {WORKER_ENDPOINT} auth={auth_state} payload={json.dumps(payload, default=str)[:200]}")
 
     try:
         resp = requests.post(
@@ -164,13 +183,14 @@ def poll_loop(start_immediately: bool = True):
 
             payload = {
                 "source": "rgyc_beacon",
+                "device_id": "rgyc-beacon",
                 "time_local": ts_local,
                 "time_utc": ts_utc,
-                "wind_speed_kts": wind_speed,
-                "wind_dir": direction,
-                "max_kts": max_val,
-                "min_kts": min_val,
-                "avg_kts": avg_val,
+                "wind_speed_kts": parse_number(wind_speed),
+                "wind_dir": parse_number(direction),
+                "max_kts": parse_number(max_val),
+                "min_kts": parse_number(min_val),
+                "avg_kts": parse_number(avg_val),
                 "image_url": IMAGE_URL,
             }
 

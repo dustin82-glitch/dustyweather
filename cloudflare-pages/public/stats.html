@@ -137,7 +137,7 @@ button:hover {
 <div class="page-shell">
     <div class="top-bar">
         <div>
-            <h2>Wind Graph and Weather Stats</h2>
+            <h2 id="pageTitle">Wind Graph and Weather Stats</h2>
             <p class="subtitle" id="status">Loading history...</p>
         </div>
         <div class="top-links">
@@ -146,6 +146,11 @@ button:hover {
     </div>
 
     <div class="controls">
+        <label for="locationSelect">Location:</label>
+        <select id="locationSelect">
+            <option value="jarvis">Jarvis</option>
+            <option value="rgyc">RGYC Beacon</option>
+        </select>
         <label for="hoursSelect">Window:</label>
         <select id="hoursSelect">
             <option value="1">Last 1 Hour</option>
@@ -173,6 +178,22 @@ button:hover {
 
 <script>
 const API_BASE = "https://weather-api.dustin-popp82.workers.dev";
+const LOCATION_KEY = "weatherLocation";
+
+const LOCATION_CONFIG = {
+    jarvis: {
+        label: "Jarvis",
+        title: "Jarvis Wind Graph and Weather Stats",
+        historyPath: "/api/history",
+        supportsTempHumRain: true
+    },
+    rgyc: {
+        label: "RGYC Beacon",
+        title: "RGYC Wind Graph and Weather Stats",
+        historyPath: "/api/rgyc/history",
+        supportsTempHumRain: false
+    }
+};
 
 let chart = null;
 
@@ -206,6 +227,37 @@ function normalizeRows(payload) {
         return payload.results;
     }
     return [];
+}
+
+function getSelectedLocation() {
+    const selected = localStorage.getItem(LOCATION_KEY) || "jarvis";
+    return LOCATION_CONFIG[selected] ? selected : "jarvis";
+}
+
+function getLocationConfig() {
+    return LOCATION_CONFIG[getSelectedLocation()];
+}
+
+function getHistoryUrl(hours) {
+    const cfg = getLocationConfig();
+    return `${API_BASE}${cfg.historyPath}?hours=${hours}&t=${Date.now()}`;
+}
+
+function applyLocationUi() {
+    const cfg = getLocationConfig();
+    const pageTitle = document.getElementById("pageTitle");
+    const status = document.getElementById("status");
+    const locationSelect = document.getElementById("locationSelect");
+
+    if (pageTitle) {
+        pageTitle.innerText = cfg.title;
+    }
+    if (status) {
+        status.innerText = `Loading ${cfg.label} history...`;
+    }
+    if (locationSelect) {
+        locationSelect.value = getSelectedLocation();
+    }
 }
 
 function summary(values) {
@@ -244,6 +296,7 @@ function num(v, digits, unit) {
 }
 
 function renderStats(rows, hours) {
+    const cfg = getLocationConfig();
     const avgWind = summary(rows.map((r) => toNumber(r.avg)));
     const gustWind = summary(rows.map((r) => toNumber(r.gust)));
     const temp = summary(rows.map((r) => toNumber(r.temp)));
@@ -264,6 +317,7 @@ function renderStats(rows, hours) {
             <div class="stat-row"><span>Avg</span><span>${num(gustWind.avg, 1, "kn")}</span></div>
             <div class="stat-row"><span>Max</span><span>${num(gustWind.max, 1, "kn")}</span></div>
         </div>
+        ${cfg.supportsTempHumRain ? `
         <div class="stat-card">
             <h3>Temperature</h3>
             <div class="stat-row"><span>Min</span><span>${num(temp.min, 1, "C")}</span></div>
@@ -280,6 +334,7 @@ function renderStats(rows, hours) {
             <h3>Rainfall</h3>
             <div class="stat-row"><span>Total (${hours}h)</span><span>${num(rain, 1, "mm")}</span></div>
         </div>
+        ` : ""}
     `;
 }
 
@@ -376,10 +431,11 @@ function renderChart(rows) {
 async function loadStats() {
     const hours = Number(document.getElementById("hoursSelect").value || 24);
     const status = document.getElementById("status");
+    const cfg = getLocationConfig();
 
     try {
-        status.innerText = `Loading ${hours}h of data...`;
-        const r = await fetch(`${API_BASE}/api/history?hours=${hours}&t=${Date.now()}`, { cache: "no-store" });
+        status.innerText = `Loading ${cfg.label} ${hours}h of data...`;
+        const r = await fetch(getHistoryUrl(hours), { cache: "no-store" });
         if (!r.ok) {
             throw new Error(`HTTP ${r.status}`);
         }
@@ -390,7 +446,7 @@ async function loadStats() {
         renderStats(rows, hours);
 
         const latestTs = rows.length ? toTs(rows[rows.length - 1]) : null;
-        status.innerText = `Loaded ${rows.length} points${latestTs ? ` | Last update ${new Date(latestTs * 1000).toLocaleString()}` : ""}`;
+        status.innerText = `${cfg.label}: Loaded ${rows.length} points${latestTs ? ` | Last update ${new Date(latestTs * 1000).toLocaleString()}` : ""}`;
     } catch (err) {
         status.innerText = `Stats fetch error: ${err.message}`;
         console.error("Stats load failed:", err);
@@ -403,8 +459,16 @@ document.getElementById("resetViewBtn").addEventListener("click", () => {
         chart.resetZoom();
     }
 });
+document.getElementById("locationSelect").addEventListener("change", (event) => {
+    localStorage.setItem(LOCATION_KEY, event.target.value);
+    applyLocationUi();
+    loadStats();
+});
 document.getElementById("hoursSelect").addEventListener("change", loadStats);
-window.addEventListener("load", loadStats);
+window.addEventListener("load", () => {
+    applyLocationUi();
+    loadStats();
+});
 </script>
 </body>
 </html>
