@@ -1,6 +1,7 @@
 -- D1 schema using ESP payload field names.
 CREATE TABLE IF NOT EXISTS readings (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  station TEXT,
   device_id TEXT,
   sid TEXT,
   ts INTEGER NOT NULL,
@@ -22,3 +23,4 @@ CREATE TABLE IF NOT EXISTS readings (
 
 CREATE INDEX IF NOT EXISTS idx_readings_ts ON readings(ts DESC);
 CREATE INDEX IF NOT EXISTS idx_readings_device_ts ON readings(device_id, ts DESC);
+CREATE INDEX IF NOT EXISTS idx_readings_station_ts ON readings(station, ts DESC);

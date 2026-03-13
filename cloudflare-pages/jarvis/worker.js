@@ -24,7 +24,7 @@ export default {
       if (!env.DB || typeof env.DB.prepare !== "function") {
         return null;
       }
-      return env.DB;A
+      return env.DB;
     };
 
     const toFinite = (v) => {
@@ -71,6 +71,7 @@ export default {
 
       return {
         id: row.id ?? null,
+        station: row.station ?? ((row.sid ?? row.device_id) === "rgyc_beacon" ? "rgyc" : "jarvis"),
         sid: row.sid ?? row.device_id ?? null,
         bat: row.bat ?? null,
         temp: row.temp ?? row.temperature_c ?? null,
@@ -124,8 +125,9 @@ export default {
       try {
         // Preferred schema uses ESP payload names directly.
         await db.prepare(
-          "INSERT INTO readings (device_id, sid, ts, temp, hum, avg, gust, dir, rain, bat, battery_v) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+          "INSERT INTO readings (station, device_id, sid, ts, temp, hum, avg, gust, dir, rain, bat, battery_v) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         ).bind(
+          "jarvis",
           deviceId,
           sid,
           ts,
@@ -179,8 +181,9 @@ export default {
 
       try {
         await db.prepare(
-          "INSERT INTO readings (device_id, sid, ts, avg, gust, dir) VALUES (?, ?, ?, ?, ?, ?)"
+          "INSERT INTO readings (station, device_id, sid, ts, avg, gust, dir) VALUES (?, ?, ?, ?, ?, ?, ?)"
         ).bind(
+          "rgyc",
           deviceId,
           sid,
           ts,
@@ -203,7 +206,7 @@ export default {
 
       try {
         const row = await db.prepare(
-          "SELECT * FROM readings WHERE sid IS NULL OR sid != 'rgyc_beacon' ORDER BY ts DESC LIMIT 1"
+          "SELECT * FROM readings WHERE COALESCE(station, CASE WHEN sid = 'rgyc_beacon' THEN 'rgyc' ELSE 'jarvis' END) = 'jarvis' ORDER BY ts DESC LIMIT 1"
         ).first();
 
         return json(mapRow(row));
@@ -223,7 +226,7 @@ export default {
 
       try {
         const result = await db.prepare(
-          "SELECT * FROM readings WHERE ts >= ? AND (sid IS NULL OR sid != 'rgyc_beacon') ORDER BY ts ASC"
+          "SELECT * FROM readings WHERE ts >= ? AND COALESCE(station, CASE WHEN sid = 'rgyc_beacon' THEN 'rgyc' ELSE 'jarvis' END) = 'jarvis' ORDER BY ts ASC"
         ).bind(since).all();
 
         return json((result.results || []).map(mapRow));
@@ -240,7 +243,7 @@ export default {
 
       try {
         const row = await db.prepare(
-          "SELECT * FROM readings WHERE sid = 'rgyc_beacon' ORDER BY ts DESC LIMIT 1"
+          "SELECT * FROM readings WHERE COALESCE(station, CASE WHEN sid = 'rgyc_beacon' THEN 'rgyc' ELSE 'jarvis' END) = 'rgyc' ORDER BY ts DESC LIMIT 1"
         ).first();
 
         return json(mapRow(row));
@@ -260,7 +263,7 @@ export default {
 
       try {
         const result = await db.prepare(
-          "SELECT * FROM readings WHERE ts >= ? AND sid = 'rgyc_beacon' ORDER BY ts ASC"
+          "SELECT * FROM readings WHERE ts >= ? AND COALESCE(station, CASE WHEN sid = 'rgyc_beacon' THEN 'rgyc' ELSE 'jarvis' END) = 'rgyc' ORDER BY ts ASC"
         ).bind(since).all();
 
         return json((result.results || []).map(mapRow));

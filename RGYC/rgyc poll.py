@@ -26,7 +26,7 @@ WORKER_ENDPOINT = os.environ.get(
     "RGYC_WORKER_ENDPOINT",
     "https://weather-api.dustin-popp82.workers.dev/rgyc-wind"
 )
-WORKER_API_KEY = os.environ.get("RGYC_WORKER_API_KEY")  # set in your OS env
+WORKER_API_KEY = os.environ.get("RGYC_WORKER_API_KEY") or os.environ.get("DEVICE_TOKEN")
 
 
 # Verify tesseract is callable
