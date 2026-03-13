@@ -196,6 +196,9 @@ const LOCATION_CONFIG = {
 };
 
 let chart = null;
+const MAX_VALID_WIND_KTS = 120;
+const ISOLATED_SPIKE_RATIO = 3;
+const ISOLATED_SPIKE_MIN_KTS = 35;
 
 if (window.Chart && window.ChartZoom) {
     Chart.register(window.ChartZoom);
@@ -271,6 +274,41 @@ function summary(values) {
     return { min, max, avg };
 }
 
+function sanitizeWindSeries(values) {
+    const clean = values.map((v) => (Number.isFinite(v) ? v : null));
+
+    // Hard drop impossible values for this station setup.
+    for (let i = 0; i < clean.length; i += 1) {
+        if (clean[i] !== null && clean[i] > MAX_VALID_WIND_KTS) {
+            clean[i] = null;
+        }
+    }
+
+    // Drop isolated one-sample spikes bounded by normal neighboring points.
+    for (let i = 1; i < clean.length - 1; i += 1) {
+        const prev = clean[i - 1];
+        const curr = clean[i];
+        const next = clean[i + 1];
+
+        if (prev === null || curr === null || next === null) {
+            continue;
+        }
+
+        const hugeRelativeJump =
+            curr >= ISOLATED_SPIKE_MIN_KTS &&
+            curr > prev * ISOLATED_SPIKE_RATIO &&
+            curr > next * ISOLATED_SPIKE_RATIO;
+
+        const neighborsAgree = Math.abs(prev - next) <= Math.max(3, curr * 0.2);
+
+        if (hugeRelativeJump && neighborsAgree) {
+            clean[i] = null;
+        }
+    }
+
+    return clean;
+}
+
 function rainfallTotal(rows) {
     const points = rows
         .map((row) => ({ ts: toTs(row), rain: toNumber(row?.rain ?? row?.rain_mm) }))
@@ -297,8 +335,13 @@ function num(v, digits, unit) {
 
 function renderStats(rows, hours) {
     const cfg = getLocationConfig();
-    const avgWind = summary(rows.map((r) => toNumber(r.avg)));
-    const gustWind = summary(rows.map((r) => toNumber(r.gust)));
+    const sorted = rows
+        .map((r) => ({ ts: toTs(r), avg: toNumber(r.avg), gust: toNumber(r.gust) }))
+        .filter((p) => p.ts !== null)
+        .sort((a, b) => a.ts - b.ts);
+
+    const avgWind = summary(sanitizeWindSeries(sorted.map((p) => p.avg)));
+    const gustWind = summary(sanitizeWindSeries(sorted.map((p) => p.gust)));
     const temp = summary(rows.map((r) => toNumber(r.temp)));
     const hum = summary(rows.map((r) => toNumber(r.hum)));
     const rain = rainfallTotal(rows);
@@ -345,8 +388,8 @@ function renderChart(rows) {
         .sort((a, b) => a.ts - b.ts);
 
     const labels = sorted.map((p) => formatLocalTime(p.ts));
-    const avgData = sorted.map((p) => p.avg);
-    const gustData = sorted.map((p) => p.gust);
+    const avgData = sanitizeWindSeries(sorted.map((p) => p.avg));
+    const gustData = sanitizeWindSeries(sorted.map((p) => p.gust));
     const dirData = sorted.map((p) => p.dir);
 
     const ctx = document.getElementById("windChart").getContext("2d");
